@@ -3,15 +3,18 @@ import { jwtDecode } from 'jwt-decode';
 import Cookies from 'js-cookie';
 import { login as loginAPI } from '../../api/auth/auth';
 import type {User, AuthState} from '../../types/User';
+import type { JWTPayload } from '../../types/auth';
 
-interface JWTPayload {
-  scope: string;
-  sub: string;
-  exp: number;
-  iat: number;
-  jti: string;
-  iss: string;
-}
+// Biến toàn cục để lưu role (có thể truy cập từ bất kỳ đâu)
+let globalUserRole: string | null = null;
+let globalUserId: string | null = null;
+
+// Export functions để truy cập biến toàn cục
+export const getGlobalUserRole = (): string | null => globalUserRole;
+export const getGlobalUserId = (): string | null => globalUserId;
+export const setGlobalUserRole = (role: string | null): void => { globalUserRole = role; };
+export const setGlobalUserId = (userId: string | null): void => { globalUserId = userId; };
+
 
 const initialState: AuthState = {
   user: null,
@@ -24,14 +27,14 @@ const initialState: AuthState = {
 // Async thunk cho login
 export const loginUser = createAsyncThunk(
   'auth/loginUser',
-  async ({ email, password }: { email: string; password: string }, { dispatch, rejectWithValue }) => {
+  async ({ username, password }: { username: string; password: string }, { dispatch, rejectWithValue }) => {
     try {
       dispatch(setLoading(true));
 
-      const tokenResponse = await loginAPI(email, password);
+      const accessToken = await loginAPI(username, password);
 
       // Lưu token vào cookies
-      Cookies.set('authToken', tokenResponse.token, {
+      Cookies.set('authToken', accessToken, {
         httpOnly: false,
         secure: false,
         sameSite: 'strict',
@@ -39,25 +42,40 @@ export const loginUser = createAsyncThunk(
       });
 
       // Giải mã token để lấy thông tin user
-      const decodedToken = jwtDecode<JWTPayload>(tokenResponse.token);
+      const decodedToken = jwtDecode<JWTPayload>(accessToken);
+
+      // Lấy role từ realm_access.roles (lấy role đầu tiên không phải default)
+      const userRole = decodedToken.realm_access?.roles?.find(role => 
+        role !== 'default-roles-bank_account' && 
+        role !== 'offline_access' && 
+        role !== 'uma_authorization'
+      ) || 'USER'; // fallback to USER
 
       // Tạo object User từ token đã giải mã
       const user: User = {
         id: decodedToken.sub,
+        role: userRole, // ADMIN, USER
         scope: decodedToken.scope,
         sub: decodedToken.sub,
         exp: decodedToken.exp,
         iat: decodedToken.iat,
         jti: decodedToken.jti,
         iss: decodedToken.iss,
+        username: decodedToken.preferred_username,
+        fullName: decodedToken.name,
+        email: decodedToken.email,
       };
 
       // Lưu vào localStorage
       localStorage.setItem('userScope', decodedToken.scope);
       localStorage.setItem('userId', decodedToken.sub);
 
+      // Cập nhật biến toàn cục
+      setGlobalUserRole(decodedToken.scope);
+      setGlobalUserId(decodedToken.sub);
+
       return {
-        token: tokenResponse.token,
+        token: accessToken,
         user: user,
       };
     } catch (error) {
@@ -72,10 +90,13 @@ export const logoutUser = createAsyncThunk(
   async (_, { dispatch }) => {
     dispatch(setLoading(true));
 
-    // Xóa cookies và localStorage
     Cookies.remove('authToken');
     localStorage.removeItem('userScope');
     localStorage.removeItem('userId');
+
+    // Clear biến toàn cục
+    setGlobalUserRole(null);
+    setGlobalUserId(null);
 
     dispatch(setLoading(false));
     return null;
@@ -99,6 +120,10 @@ const authSlice = createSlice({
       Cookies.remove('authToken');
       localStorage.removeItem('userScope');
       localStorage.removeItem('userId');
+      
+      // Clear biến toàn cục
+      setGlobalUserRole(null);
+      setGlobalUserId(null);
     },
     setLoading(state, action: PayloadAction<boolean>) {
       state.loading = action.payload;
@@ -110,34 +135,60 @@ const authSlice = createSlice({
       state.error = null;
     },
     initializeAuth(state) {
-      // Khôi phục thông tin auth từ cookies và localStorage khi app khởi động
+      // Khôi phục thông tin auth từ cookies khi app khởi động
       const token = Cookies.get('authToken');
-      const userId = localStorage.getItem('userId');
-      const userScope = localStorage.getItem('userScope');
 
-      if (token && userId && userScope) {
+      if (token) {
         try {
           const decodedToken = jwtDecode<JWTPayload>(token);
+          
+          // Kiểm tra token có hết hạn không
+          const currentTime = Date.now() / 1000;
+          if (decodedToken.exp < currentTime) {
+            // Token đã hết hạn, xóa cookies
+            Cookies.remove('authToken');
+            state.user = null;
+            state.token = null;
+            state.isAuthenticated = false;
+            setGlobalUserRole(null);
+            setGlobalUserId(null);
+            return;
+          }
+
+          // Lấy role từ realm_access.roles
+          const userRole = decodedToken.realm_access?.roles?.find(role => 
+            role !== 'default-roles-bank_account' && 
+            role !== 'offline_access' && 
+            role !== 'uma_authorization'
+          ) || 'USER';
 
           state.token = token;
           state.user = {
-            id: userId,
-            scope: userScope,
+            id: decodedToken.sub,
+            role: userRole,
+            scope: decodedToken.scope,
             sub: decodedToken.sub,
             exp: decodedToken.exp,
             iat: decodedToken.iat,
             jti: decodedToken.jti,
             iss: decodedToken.iss,
+            username: decodedToken.preferred_username,
+            fullName: decodedToken.name,
+            email: decodedToken.email,
           };
           state.isAuthenticated = true;
+          
+          // Cập nhật biến toàn cục
+          setGlobalUserRole(userRole);
+          setGlobalUserId(decodedToken.sub);
         } catch (error) {
-          // Token không hợp lệ, xóa dữ liệu
+          // Token không hợp lệ, xóa cookies
           state.user = null;
           state.token = null;
           state.isAuthenticated = false;
           Cookies.remove('authToken');
-          localStorage.removeItem('userScope');
-          localStorage.removeItem('userId');
+          setGlobalUserRole(null);
+          setGlobalUserId(null);
         }
       }
     }

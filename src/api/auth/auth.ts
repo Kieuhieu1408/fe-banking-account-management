@@ -1,12 +1,24 @@
-import type { Token } from "../../types/Token.ts";
+import type { ApiResponse } from "../../types/ApiResponse";
+import axios from 'axios';
+import type { AuthResult } from "../../types/auth";
+const BASE_URL = import.meta.env.VITE_BASE_URL;
 
-export const login = async (_username: string, _password: string): Promise<Token> => {
-    // Giả lập API call với delay để mô phỏng network request
-    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Trả về đối tượng Token giả lập
-    return {
-        token: "eyJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJkZXZ0ZXJpYS5jb20iLCJzdWIiOiJkMDUzOGQxZS05YTQ5LTQ5MGUtODM0ZC1mMDdiODA3YTQ5YWQiLCJleHAiOjE3NTQwMzQwODUsImlhdCI6MTc1NDAzMDQ4NSwianRpIjoiOGZmZDhmMDUtMGMxNS00Y2U2LWFkNjItMjAyMDY5MjUxOTYyIiwic2NvcGUiOiJST0xFX0FETUlOIn0.wfOmz3fnMMfaX9SPEps5nPhxDDg9J8qmD5LAmjiN8X53UWuh9kvB9Au0Nka6t-cG_XK074FtrHdNGjrabc7lAA",
-        expiryTime: null
-    };
+
+export const login = async (username: string, password: string): Promise<string> => {
+    try {
+        const response = await axios.post<ApiResponse<AuthResult>>(
+            `${BASE_URL}/auth/token`,
+            { username, password }
+        );
+
+        if (response.data.code === 1000 && response.data.result && response.data.result.access_token) {
+            return response.data.result.access_token;
+        } else {
+            throw new Error("Login failed: Invalid response");
+        }
+    } catch (error) {
+        console.error("Login error:", error);
+        throw error;
+    }
 };

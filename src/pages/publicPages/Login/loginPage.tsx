@@ -1,66 +1,42 @@
-import { useState } from 'react';
-import { jwtDecode } from 'jwt-decode';
-import Cookies from 'js-cookie';
-import { login } from '../../../api/auth/auth';
-
-interface JWTPayload {
-    scope: string;
-    sub: string;
-    exp: number;
-    iat: number;
-    jti: string;
-    iss: string;
-}
+import { useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
+import { loginUser } from '../../../store/slices/authSlice';
+import type { RootState, AppDispatch } from '../../../store';
 
 const LoginPage = () => {
-    const [email, setEmail] = useState('');
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState('');
+    const dispatch = useDispatch<AppDispatch>();
+    const navigate = useNavigate();
+    
+    const { loading, error, isAuthenticated, user } = useSelector((state: RootState) => state.auth);
+
+    useEffect(() => {
+        // Redirect nếu đã đăng nhập
+        if (isAuthenticated && user) {
+            if (user.role === 'ADMIN') {
+                navigate('/admin/home-page', { replace: true });
+            } else if (user.role === 'USER') {
+                navigate('/user/home', { replace: true });
+            } else {
+                navigate('/user/home', { replace: true });
+            }
+        }
+    }, [isAuthenticated, user, navigate]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsLoading(true);
-        setError('');
-
+        
         try {
-            // Gọi API login
-            const tokenResponse = await login(email, password);
-
-            // Lưu token vào httpOnly cookies
-            Cookies.set('authToken', tokenResponse.token, {
-                httpOnly: false, // Trong môi trường thực tế, backend sẽ set httpOnly cookies
-                secure: false, // Trong production nên set true
-                sameSite: 'strict',
-                expires: 7 // 7 ngày
-            });
-
-            // Giải mã token để lấy scope
-            const decodedToken = jwtDecode<JWTPayload>(tokenResponse.token);
-
-            // Lưu scope vào localStorage
-            localStorage.setItem('userScope', decodedToken.scope);
-            localStorage.setItem('userId', decodedToken.sub);
-
-            console.log('Login successful:', {
-                scope: decodedToken.scope,
-                userId: decodedToken.sub
-            });
-
-            if (decodedToken.scope === 'ROLE_ADMIN') {
-                window.location.href = '/admin/home-page';
-            } else if (decodedToken.scope === 'ROLE_USER') {
-                window.location.href = '/user/home';
-            } else {
-                // Fallback cho các role khác
-                window.location.href = '/user/home';
+            const result = await dispatch(loginUser({ username, password }));
+            
+            if (loginUser.fulfilled.match(result)) {
+                // Login thành công, useEffect sẽ handle redirect
+                console.log('Login successful:', result.payload);
             }
-
         } catch (err) {
             console.error('Login failed:', err);
-            setError('Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin đăng nhập.');
-        } finally {
-            setIsLoading(false);
         }
     };
 
@@ -82,13 +58,13 @@ const LoginPage = () => {
 
                 <div className="mb-4">
                     <label className="block text-gray-700 text-sm font-bold mb-2">
-                        Email
+                        Tài khoản
                     </label>
                     <input
-                        type="email"
-                        placeholder="Nhập email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        type="text"
+                        placeholder="Nhập tài khoản"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
                         className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring"
                         required
                     />
@@ -111,14 +87,14 @@ const LoginPage = () => {
                 <div className="flex items-center justify-between">
                     <button
                         type="submit"
-                        disabled={isLoading}
+                        disabled={loading}
                         className={`${
-                            isLoading 
+                            loading 
                                 ? 'bg-gray-400 cursor-not-allowed' 
                                 : 'bg-blue-600 hover:bg-blue-700'
                         } text-white font-bold py-2 px-4 rounded focus:outline-none w-full`}
                     >
-                        {isLoading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+                        {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
                     </button>
                 </div>
             </form>

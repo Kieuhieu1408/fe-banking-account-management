@@ -5,7 +5,8 @@ export interface User {
   username?: string;
   fullName?: string;
   phone?: string;
-  scope: string; // ROLE_ADMIN, ROLE_USER
+  role: string; // ADMIN, USER (từ realm_access.roles)
+  scope: string; // openid profile email
   sub: string; // subject từ JWT
   exp: number; // expiration time
   iat: number; // issued at
